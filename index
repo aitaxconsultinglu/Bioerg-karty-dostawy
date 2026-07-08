@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Karta dostawy — porządkowanie danych</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.1/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root{
+    --blueprint: #0e2a44;
+    --blueprint-deep: #081a2c;
+    --line: #4fa8d8;
+    --paper: #eef3f6;
+    --paper-dim: #dde6ec;
+    --ink: #0e2436;
+    --muted: #55708a;
+    --accent: #f2b134;
+    --accent-ink: #4a3103;
+    --success: #3f9c6e;
+    --danger: #c1440e;
+    --radius: 2px;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      linear-gradient(var(--blueprint), var(--blueprint)),
+      repeating-linear-gradient(0deg, rgba(79,168,216,0.08) 0px, rgba(79,168,216,0.08) 1px, transparent 1px, transparent 32px),
+      repeating-linear-gradient(90deg, rgba(79,168,216,0.08) 0px, rgba(79,168,216,0.08) 1px, transparent 1px, transparent 32px);
+    color: var(--paper);
+    font-family: 'IBM Plex Sans', sans-serif;
+    min-height: 100vh;
+    line-height: 1.5;
+  }
+  .wrap{ max-width: 980px; margin: 0 auto; padding: 48px 24px 80px; }
+  .eyebrow{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.14em;
+    color: var(--line);
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  h1{
+    font-family:'Space Grotesk', sans-serif;
+    font-size: clamp(28px, 4vw, 40px);
+    font-weight: 700;
+    margin: 0 0 12px;
+    color: #fff;
+    letter-spacing: -0.01em;
+  }
+  .lede{
+    color: #b9cbdb;
+    max-width: 60ch;
+    font-size: 15px;
+    margin: 0 0 40px;
+  }
+  .panel{
+    background: var(--paper);
+    color: var(--ink);
+    border-radius: var(--radius);
+    box-shadow: 0 18px 40px rgba(0,0,0,0.35);
+  }
+
+  /* ---- drop zone ---- */
+  .dropzone{
+    position: relative;
+    border: 2px dashed #9fb3c2;
+    background: #fff;
+    padding: 56px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s ease, background .15s ease;
+  }
+  .dropzone:hover, .dropzone.drag{
+    border-color: var(--accent);
+    background: #fffdf5;
+  }
+  .dropzone:focus-visible{ outline: 3px solid var(--line); outline-offset: 3px; }
+  .crop{ position:absolute; width:18px; height:18px; }
+  .crop::before, .crop::after{ content:''; position:absolute; background: var(--muted); }
+  .crop::before{ width:100%; height:2px; top:50%; transform:translateY(-50%);}
+  .crop::after{ width:2px; height:100%; left:50%; transform:translateX(-50%);}
+  .crop.tl{ top:10px; left:10px; }
+  .crop.tr{ top:10px; right:10px; }
+  .crop.bl{ bottom:10px; left:10px; }
+  .crop.br{ bottom:10px; right:10px; }
+
+  .dz-icon{ width:40px; height:40px; margin: 0 auto 18px; color: var(--muted); }
+  .dz-title{ font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:18px; margin-bottom:6px; }
+  .dz-sub{ font-size:13px; color: var(--muted); }
+  .dz-formats{ margin-top:14px; font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.06em; color:#8397a8; text-transform:uppercase;}
+  input[type=file]{ display:none; }
+
+  /* ---- log ---- */
+  #log{
+    font-family:'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    color: var(--muted);
+    padding: 18px 24px;
+    border-top: 1px solid #dbe3e9;
+    display:none;
+  }
+  #log div{ padding: 2px 0; }
+  #log .ok::before{ content:'✓ '; color: var(--success); font-weight:600; }
+  #log .go::before{ content:'· '; color: var(--line); }
+
+  /* ---- results ---- */
+  #results{ display:none; margin-top: 28px; }
+  .stats{ display:flex; flex-wrap:wrap; gap: 14px; padding: 22px 24px; border-bottom: 1px solid #dbe3e9; }
+  .stat{ min-width: 140px; }
+  .stat .n{ font-family:'Space Grotesk', sans-serif; font-size: 26px; font-weight:700; color: var(--ink); }
+  .stat .l{ font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+  .actions{ display:flex; flex-wrap:wrap; gap:10px; padding: 20px 24px; border-bottom: 1px solid #dbe3e9; }
+  button{
+    font-family:'IBM Plex Sans', sans-serif;
+    font-weight: 600;
+    font-size: 14px;
+    border: none;
+    padding: 12px 18px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    transition: transform .1s ease, box-shadow .1s ease;
+  }
+  button:focus-visible{ outline: 3px solid var(--line); outline-offset: 2px; }
+  .btn-primary{ background: var(--ink); color: #fff; }
+  .btn-primary:hover{ transform: translateY(-1px); }
+  .btn-accent{ background: var(--accent); color: var(--accent-ink); }
+  .btn-accent:hover{ transform: translateY(-1px); }
+  .btn-ghost{ background: transparent; color: var(--muted); text-decoration: underline; padding: 12px 4px; }
+
+  .table-wrap{ overflow:auto; max-height: 480px; padding: 0 24px 24px; }
+  table{ width:100%; border-collapse: collapse; font-size: 12.5px; }
+  thead th{
+    position: sticky; top:0;
+    background: var(--ink); color:#fff;
+    text-align:left; padding: 9px 10px;
+    font-weight:600; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .04em;
+    white-space: nowrap;
+  }
+  tbody td{ padding: 7px 10px; border-bottom: 1px solid #e6ecf0; white-space: nowrap; }
+  tbody tr:nth-child(even){ background: #f7f9fb; }
+  td.num, th.num{ text-align:right; font-family:'IBM Plex Mono', monospace; }
+  tfoot td{ padding: 10px; font-weight:700; border-top: 2px solid var(--ink); font-family:'IBM Plex Mono', monospace; }
+
+  .note{ padding: 16px 24px 26px; font-size: 12.5px; color: var(--muted); }
+
+  #error{
+    display:none; margin-top:18px; padding: 16px 20px;
+    background: #3a1408; border-left: 4px solid var(--danger);
+    color:#ffd9c7; font-size:13.5px; border-radius: var(--radius);
+  }
+
+  footer{ margin-top: 40px; font-size: 12px; color: #7d93a6; }
+  footer a{ color: var(--line); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Narzędzie wewnętrzne · Unibep</div>
+  <h1>Karta dostawy — porządkowanie danych</h1>
+  <p class="lede">Wgraj eksportowany plik karty dostawy (.xls lub .xlsx). Aplikacja wyciągnie z niego pozycje materiałowe, oczyści dane i przygotuje gotową tabelę — do pobrania jako arkusz Excel albo jako PDF sformatowany pod wydruk A4. Wszystko dzieje się lokalnie w przeglądarce — plik nie jest nigdzie wysyłany.</p>
+
+  <div class="panel">
+    <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Wybierz lub przeciągnij plik Excel">
+      <span class="crop tl"></span><span class="crop tr"></span><span class="crop bl"></span><span class="crop br"></span>
+      <svg class="dz-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">
+        <path d="M12 3v12m0-12 4.5 4.5M12 3 7.5 7.5"/>
+        <path d="M4 16v2.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V16"/>
+      </svg>
+      <div class="dz-title">Przeciągnij plik tutaj</div>
+      <div class="dz-sub">albo kliknij, żeby wybrać z dysku</div>
+      <div class="dz-formats">.XLS &nbsp;·&nbsp; .XLSX</div>
+      <input type="file" id="fileInput" accept=".xls,.xlsx">
+    </div>
+
+    <div id="log"></div>
+
+    <div id="error"></div>
+
+    <div id="results">
+      <div class="stats">
+        <div class="stat"><div class="n" id="statRows">0</div><div class="l">Pozycji</div></div>
+        <div class="stat"><div class="n" id="statOrders">0</div><div class="l">Zamówień</div></div>
+        <div class="stat"><div class="n" id="statSuppliers">0</div><div class="l">Dostawców</div></div>
+        <div class="stat"><div class="n" id="statValue">0</div><div class="l">Suma wartości (PLN)</div></div>
+      </div>
+      <div class="actions">
+        <button class="btn-primary" id="btnXlsx">Pobierz .xlsx</button>
+        <button class="btn-accent" id="btnPdf">Pobierz PDF (A4)</button>
+        <button class="btn-ghost" id="btnReset">Wgraj inny plik</button>
+      </div>
+      <div class="table-wrap">
+        <table id="preview">
+          <thead></thead>
+          <tbody></tbody>
+          <tfoot></tfoot>
+        </table>
+      </div>
+      <div class="note">Podgląd pokazuje wszystkie wykryte pozycje. Jeśli coś wygląda źle (np. nietypowy układ kolumn w tym eksporcie), sprawdź plik źródłowy — parser opiera się na nagłówkach „Materiał", „Dostawca", „Ilość" i „Cena".</div>
+    </div>
+  </div>
+
+  <footer>Dane przetwarzane lokalnie w przeglądarce pracownika — plik nigdy nie opuszcza jego komputera.</footer>
+</div>
+
+<script>
+const HEADERS = ['Nr zamówienia','Dostawca','Materiał','Ilość','J.m.','Ilość zrealizowana','Cena jedn. (PLN)','Wartość (PLN)','Data dostawy / Status'];
+const KEYS = ['orderNr','dostawca','material','ilosc','jednostka','iloscZreal','cenaJedn','wartosc','dataStatus'];
+const NUM_KEYS = new Set(['ilosc','iloscZreal','cenaJedn','wartosc']);
+
+let currentTitle = 'Karta dostawy';
+let currentRecords = [];
+
+const logEl = document.getElementById('log');
+const errorEl = document.getElementById('error');
+const resultsEl = document.getElementById('results');
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+
+function logStep(msg, ok){
+  logEl.style.display = 'block';
+  const d = document.createElement('div');
+  d.className = ok ? 'ok' : 'go';
+  d.textContent = msg;
+  logEl.appendChild(d);
+}
+function showError(msg){
+  errorEl.style.display = 'block';
+  errorEl.textContent = msg;
+}
+function resetUI(){
+  logEl.style.display='none'; logEl.innerHTML='';
+  errorEl.style.display='none'; errorEl.textContent='';
+  resultsEl.style.display='none';
+  fileInput.value='';
+}
+
+['dragenter','dragover'].forEach(evt=>{
+  dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.classList.add('drag'); });
+});
+['dragleave','drop'].forEach(evt=>{
+  dropzone.addEventListener(evt, e=>{ e.preventDefault(); dropzone.classList.remove('drag'); });
+});
+dropzone.addEventListener('drop', e=>{
+  const f = e.dataTransfer.files[0];
+  if(f) handleFile(f);
+});
+dropzone.addEventListener('click', ()=> fileInput.click());
+dropzone.addEventListener('keydown', e=>{ if(e.key==='Enter' || e.key===' ') fileInput.click(); });
+fileInput.addEventListener('change', e=>{
+  const f = e.target.files[0];
+  if(f) handleFile(f);
+});
+document.getElementById('btnReset').addEventListener('click', resetUI);
+
+function handleFile(file){
+  resetUI();
+  logStep('Wczytywanie pliku „' + file.name + '"…');
+  const reader = new FileReader();
+  reader.onload = (e)=>{
+    try{
+      const data = new Uint8Array(e.target.result);
+      const wb = XLSX.read(data, {type:'array', cellDates:true});
+      logStep('Plik odczytany (arkusz: ' + wb.SheetNames[0] + ')', true);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const matrix = XLSX.utils.sheet_to_json(ws, {header:1, defval:'', raw:true});
+      processMatrix(matrix);
+    }catch(err){
+      console.error(err);
+      showError('Nie udało się odczytać pliku: ' + err.message);
+    }
+  };
+  reader.onerror = ()=> showError('Błąd odczytu pliku.');
+  reader.readAsArrayBuffer(file);
+}
+
+function normalize(s){
+  return (s===null||s===undefined) ? '' : s.toString().replace(/\n/g,' ').replace(/\s+/g,' ').trim().toLowerCase();
+}
+
+function findColumns(matrix){
+  const cols = {material:null, supplier:null, qty:[], price:[], date:null, materialHeaderRow:null};
+  const scanRows = Math.min(matrix.length, 15);
+  for(let r=0;r<scanRows;r++){
+    const row = matrix[r] || [];
+    for(let c=0;c<row.length;c++){
+      const v = normalize(row[c]);
+      if(!v) continue;
+      if(v.includes('materiał') || v.includes('material')){ cols.material ??= c; cols.materialHeaderRow = r; }
+      if(v.includes('dostawca')) cols.supplier ??= c;
+      if(v.includes('ilo')) cols.qty.push(c);
+      if(v.includes('cena')) cols.price.push(c);
+      if(v.includes('data dostawy')) cols.date ??= c;
+    }
+  }
+  cols.qty = [...new Set(cols.qty)].sort((a,b)=>a-b);
+  cols.price = [...new Set(cols.price)].sort((a,b)=>a-b);
+  return cols;
+}
+
+function bestColumn(matrix, startRow, guess, range, predicate, sampleSize){
+  sampleSize = sampleSize || 150;
+  let bestShift = 0, bestCount = -1;
+  for(const shift of range){
+    const col = guess + shift;
+    if(col < 0) continue;
+    let count = 0;
+    for(let r = startRow; r < Math.min(matrix.length, startRow + sampleSize); r++){
+      const v = (matrix[r] || [])[col];
+      if(predicate(v)) count++;
+    }
+    if(count > bestCount){ bestCount = count; bestShift = shift; }
+  }
+  return guess + bestShift;
+}
+
+function toNum(v){
+  if(v === '' || v === null || v === undefined) return null;
+  if(typeof v === 'number') return v;
+  const n = parseFloat(v.toString().replace(/\s/g,'').replace(',','.'));
+  return isNaN(n) ? null : n;
+}
+
+function pad2(n){ return n.toString().padStart(2,'0'); }
+
+function formatDateOrStatus(v){
+  if(v === '' || v === null || v === undefined) return '';
+  if(v instanceof Date && !isNaN(v)) {
+    return pad2(v.getDate()) + '.' + pad2(v.getMonth()+1) + '.' + v.getFullYear();
+  }
+  return v.toString().trim();
+}
+
+function cleanText(v){
+  return (v===null||v===undefined) ? '' : v.toString().replace(/^['"]+|['"]+$/g,'').replace(/\s+/g,' ').trim();
+}
+
+function processMatrix(matrix){
+  // title: first row (0-5) containing "KARTA"
+  let title = null;
+  for(let r=0;r<Math.min(matrix.length,6);r++){
+    const row = matrix[r]||[];
+    for(const cell of row){
+      const s = cleanText(cell);
+      if(s && s.toUpperCase().includes('KARTA')){ title = s; break; }
+    }
+    if(title) break;
+  }
+  currentTitle = title || 'Karta dostawy';
+  logStep('Tytuł dokumentu: „' + currentTitle + '"', true);
+
+  const cols = findColumns(matrix);
+  const materialCol = cols.material ?? 0;
+  const supplierCol = cols.supplier ?? 2;
+  const qtyOrderedCol = cols.qty[0] ?? 7;
+  const unitCol = qtyOrderedCol + 1;
+  const firstDataRow = (cols.materialHeaderRow ?? 5) + 1;
+
+  // "Ilość zrealizowana" and "Data dostawy" headers often sit in a merged
+  // cell anchored one column to the LEFT of where the real per-row values
+  // are. Snap narrowly (guess vs. guess+1) by checking which column actually
+  // holds data, without touching the other, already-reliable columns.
+  const qtyRealizedGuess = cols.qty[1] ?? (qtyOrderedCol + 2);
+  const qtyRealizedCol = bestColumn(matrix, firstDataRow, qtyRealizedGuess, [0,1], v => typeof v === 'number');
+  const priceCol = cols.price[0] ?? (qtyRealizedCol + 1);
+  const valueCol = priceCol + 1;
+  const dateGuess = cols.date ?? (valueCol + 2);
+  const dateCol = bestColumn(matrix, firstDataRow, dateGuess, [0,1], v => (v instanceof Date) || (typeof v === 'string' && v.trim() && v.trim().length < 30));
+
+  logStep('Wykryto kolumny — Materiał: ' + materialCol + ', Dostawca: ' + supplierCol + ', Ilość: ' + qtyOrderedCol + ', Cena: ' + priceCol, true);
+
+  const orderRegex = /^[A-Za-zĄĆĘŁŃÓŚŹŻąćęłńóśźż]{1,4}\/\d+\/\d{4}$/;
+  const stopRegex = /suma dostaw|godzina wydruku|^strona\s/i;
+
+  let currentOrder = '', currentSupplier = '';
+  const records = [];
+
+  for(let r = firstDataRow; r < matrix.length; r++){
+    const row = matrix[r] || [];
+    const c0 = cleanText(row[materialCol]);
+    const supplierVal = cleanText(row[supplierCol]);
+
+    if(!c0 && !supplierVal) continue;
+    if(c0 && stopRegex.test(c0)) break;
+
+    if(orderRegex.test(c0) && supplierVal){
+      currentOrder = c0;
+      currentSupplier = cleanText(supplierVal);
+      continue;
+    }
+
+    if(c0){
+      records.push({
+        orderNr: currentOrder,
+        dostawca: currentSupplier,
+        material: c0,
+        ilosc: toNum(row[qtyOrderedCol]),
+        jednostka: cleanText(row[unitCol]),
+        iloscZreal: toNum(row[qtyRealizedCol]),
+        cenaJedn: toNum(row[priceCol]),
+        wartosc: toNum(row[valueCol]),
+        dataStatus: formatDateOrStatus(row[dateCol])
+      });
+    }
+  }
+
+  if(records.length === 0){
+    showError('Nie znaleziono żadnych pozycji materiałowych. Sprawdź, czy plik ma taki sam układ jak przykładowa karta dostawy (kolumny „Materiał", „Dostawca", „Ilość", „Cena").');
+    return;
+  }
+
+  logStep('Znaleziono ' + records.length + ' pozycji materiałowych', true);
+  currentRecords = records;
+  renderResults(records);
+}
+
+function renderResults(records){
+  const orders = new Set(records.map(r=>r.orderNr).filter(Boolean));
+  const suppliers = new Set(records.map(r=>r.dostawca).filter(Boolean));
+  const total = records.reduce((s,r)=> s + (r.wartosc||0), 0);
+
+  document.getElementById('statRows').textContent = records.length;
+  document.getElementById('statOrders').textContent = orders.size;
+  document.getElementById('statSuppliers').textContent = suppliers.size;
+  document.getElementById('statValue').textContent = total.toLocaleString('pl-PL', {minimumFractionDigits:2, maximumFractionDigits:2});
+
+  const thead = document.querySelector('#preview thead');
+  const tbody = document.querySelector('#preview tbody');
+  const tfoot = document.querySelector('#preview tfoot');
+  thead.innerHTML = '<tr>' + HEADERS.map((h,i)=> '<th class="' + (NUM_KEYS.has(KEYS[i])?'num':'') + '">' + h + '</th>').join('') + '</tr>';
+
+  tbody.innerHTML = records.map(r=>{
+    return '<tr>' + KEYS.map(k=>{
+      const v = r[k];
+      const isNum = NUM_KEYS.has(k);
+      const display = isNum ? (v===null||v===undefined ? '' : v.toLocaleString('pl-PL',{minimumFractionDigits:2, maximumFractionDigits:2})) : (v||'');
+      return '<td class="' + (isNum?'num':'') + '">' + escapeHtml(display) + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+
+  tfoot.innerHTML = '<tr><td colspan="7">Razem</td><td class="num">' + total.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2}) + '</td><td></td></tr>';
+
+  resultsEl.style.display = 'block';
+}
+
+function escapeHtml(s){
+  return s.toString().replace(/[&<>"']/g, c=> ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ---------------- XLSX export ---------------- */
+document.getElementById('btnXlsx').addEventListener('click', ()=>{
+  const rows = [
+    [currentTitle],
+    [],
+    HEADERS,
+    ...currentRecords.map(r=> KEYS.map(k=> r[k])),
+  ];
+  const total = currentRecords.reduce((s,r)=> s + (r.wartosc||0), 0);
+  rows.push(['','','','','','','Razem', total, '']);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!merges'] = [{s:{r:0,c:0}, e:{r:0,c:HEADERS.length-1}}];
+  ws['!cols'] = [
+    {wch:14},{wch:26},{wch:46},{wch:9},{wch:8},{wch:12},{wch:14},{wch:14},{wch:16}
+  ];
+
+  const titleStyle = { font:{ bold:true, sz:14, color:{rgb:'0E2436'} } };
+  const headerStyle = { font:{ bold:true, color:{rgb:'FFFFFF'} }, fill:{ fgColor:{rgb:'0E2436'} } };
+  const totalStyle = { font:{ bold:true } };
+
+  const ref = XLSX.utils.decode_range(ws['!ref']);
+  ws['A1'].s = titleStyle;
+  for(let c=0;c<HEADERS.length;c++){
+    const addr = XLSX.utils.encode_cell({r:2,c});
+    if(ws[addr]) ws[addr].s = headerStyle;
+  }
+  const totalRow = rows.length - 1;
+  for(let c=0;c<HEADERS.length;c++){
+    const addr = XLSX.utils.encode_cell({r:totalRow,c});
+    if(ws[addr]) ws[addr].s = totalStyle;
+  }
+  // number formats for currency/qty columns
+  for(let r=3; r<rows.length; r++){
+    [3,5].forEach(c=>{ const a=XLSX.utils.encode_cell({r,c}); if(ws[a]) ws[a].z = '0.00'; });
+    [6,7].forEach(c=>{ const a=XLSX.utils.encode_cell({r,c}); if(ws[a]) ws[a].z = '#,##0.00'; });
+  }
+  ws['!freeze'] = {ySplit:3};
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Karta dostawy');
+  XLSX.writeFile(wb, 'karta_dostawy_oczyszczona.xlsx');
+});
+
+/* ---------------- PDF export ---------------- */
+document.getElementById('btnPdf').addEventListener('click', ()=>{
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+
+  doc.setFont('helvetica','bold');
+  doc.setFontSize(13);
+  doc.text(currentTitle, 14, 14);
+
+  const body = currentRecords.map(r=> [
+    r.orderNr || '',
+    r.dostawca || '',
+    r.material || '',
+    r.ilosc!=null ? r.ilosc.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2}) : '',
+    r.jednostka || '',
+    r.iloscZreal!=null ? r.iloscZreal.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2}) : '',
+    r.cenaJedn!=null ? r.cenaJedn.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2}) : '',
+    r.wartosc!=null ? r.wartosc.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2}) : '',
+    r.dataStatus || ''
+  ]);
+  const total = currentRecords.reduce((s,r)=> s + (r.wartosc||0), 0);
+
+  doc.autoTable({
+    head: [HEADERS],
+    body: body,
+    foot: [['','','','','','','Razem', total.toLocaleString('pl-PL',{minimumFractionDigits:2,maximumFractionDigits:2}), '']],
+    startY: 20,
+    styles: { font:'helvetica', fontSize: 8, cellPadding: 2 },
+    headStyles: { fillColor: [14,36,54], textColor: 255, fontStyle:'bold' },
+    footStyles: { fillColor: [255,255,255], textColor: [14,36,54], fontStyle:'bold', lineWidth: 0.3 },
+    columnStyles: {
+      3:{halign:'right'}, 5:{halign:'right'}, 6:{halign:'right'}, 7:{halign:'right'}
+    },
+    margin: { left: 10, right: 10 },
+    didDrawPage: (data)=>{
+      const pageCount = doc.internal.getNumberOfPages();
+      doc.setFontSize(8);
+      doc.setFont('helvetica','normal');
+      doc.text('Strona ' + doc.internal.getCurrentPageInfo().pageNumber + ' z ' + pageCount, doc.internal.pageSize.getWidth() - 28, doc.internal.pageSize.getHeight() - 8);
+    }
+  });
+
+  doc.save('karta_dostawy_druk_A4.pdf');
+});
+</script>
+</body>
+</html>
